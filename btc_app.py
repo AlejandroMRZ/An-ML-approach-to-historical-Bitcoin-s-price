@@ -250,98 +250,56 @@ elif menu == "Dashboard":
         st.warning("No data available for the selected date range.")
     st.image("img/BTC.png", use_container_width=True)
         
+
 # Analytics Section
+st.title("Analytics & Insights")
 @st.cache_data
-def fetch_all_assets_data():
-    # Fetch data for multiple assets using Yahoo Finance
-    btc_data = yf.download('BTC-USD', start='2012-01-01', progress=False)
-    gold_data = yf.download('GC=F', start='2012-01-01', progress=False)  # Gold Futures
-    sp500_data = yf.download('^GSPC', start='2012-01-01', progress=False)  # S&P 500 Index
-    tesla_data = yf.download('TSLA', start='2012-01-01', progress=False)  # Tesla Stock
-    microstrategy_data = yf.download('MSTR', start='2012-01-01', progress=False)  # MicroStrategy Stock
-
-    # Select closing prices and rename columns for clarity
-    btc_data = btc_data[['Close']].rename(columns={'Close': 'Bitcoin'})
-    gold_data = gold_data[['Close']].rename(columns={'Close': 'Gold'})
-    sp500_data = sp500_data[['Close']].rename(columns={'Close': 'S&P 500'})
-    tesla_data = tesla_data[['Close']].rename(columns={'Close': 'Tesla'})
-    microstrategy_data = microstrategy_data[['Close']].rename(columns={'Close': 'MicroStrategy'})
-
-    # Combine all data into a single DataFrame
-    combined_df = btc_data.join(gold_data, how='outer').join(sp500_data, how='outer')
-    combined_df = combined_df.join(tesla_data, how='outer').join(microstrategy_data, how='outer')
-
-    # Normalize prices to the first available value (to start at 100%)
-    normalized_df = combined_df / combined_df.iloc[0] * 100
-
-    return normalized_df
-
-
-if menu == "Analytics":
-    st.title("Analytics & Insights")
-
-    # Fetch data
-    assets_data = fetch_all_assets_data()
-
-    # Date filters
-    start_date = st.date_input("Start Date", value=assets_data.index.min().date(), key="analytics_start")
-    end_date = st.date_input("End Date", value=assets_data.index.max().date(), key="analytics_end")
-
-    # Filter data for the selected date range
-    filtered_assets_data = assets_data.loc[f"{start_date}":f"{end_date}"]
-
-    if not filtered_assets_data.empty:
-        st.subheader("Price Comparison (Logarithmic Scale)")
-
-        # Ensure column names are strings (to avoid tuple issue)
-        filtered_assets_data.columns = filtered_assets_data.columns.map(str)
-
-        # Create a multi-line chart
-        fig = go.Figure()
-
-        # Add traces for each asset
-        for column in filtered_assets_data.columns:
-            fig.add_trace(go.Scatter(
-                x=filtered_assets_data.index,
-                y=filtered_assets_data[column],
-                mode='lines',
-                name=column  # Use the column name as a string
-            ))
-
-        # Customize layout with logarithmic scaling
-        fig.update_layout(
-            title="Price Comparison Since 2012 (Logarithmic Scale)",
-            xaxis_title="Date",
-            yaxis_title="Logarithmic Price Scale",
-            yaxis_type="log",  # Logarithmic scale applied
-            template="plotly_dark",
-            legend_title="Assets"
-        )
-
-        # Display the chart
-        st.plotly_chart(fig, use_container_width=True)
+def fetch_fear_and_greed_index():
+    """Fetch the latest Fear and Greed Index."""
+    url = "https://api.alternative.me/fng/?limit=1"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        return data['data'][0]
     else:
-        st.warning("No data available for the selected date range.")
+        st.warning("Unable to fetch the Fear and Greed Index. Please try again later.")
+        return None
 
-    # Path to the GIF
-    gif_path = "img/S5s.gif"
+@st.cache_data
+def fetch_btc_data():
+    """Fetch Bitcoin historical price data."""
+    btc_data = yf.download('BTC-USD', start='2012-01-01', progress=False)['Close']
+    return btc_data
 
-    # Fetch the Fear and Greed Index
+def calculate_rsi(data, window=14):
+    """Calculate the Relative Strength Index (RSI)."""
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+# Fetch Bitcoin data
+btc_data = fetch_btc_data()
+
+# Date Filters
+start_date = st.date_input("Start Date", value=btc_data.index.min().date())
+end_date = st.date_input("End Date", value=btc_data.index.max().date())
+
+# Filter data
+filtered_btc_data = btc_data.loc[f"{start_date}":f"{end_date}"]
+
+if not filtered_btc_data.empty:
+    # 1. Fear and Greed Index
+    st.subheader("📈 Fear and Greed Index")
     fear_and_greed = fetch_fear_and_greed_index()
-
     if fear_and_greed:
-        # Display the index
-        st.subheader("📈 Fear and Greed Index")
-        st.write("The Fear and Greed Index indicates the current market sentiment for Bitcoin.")
-        
-        # Show the index value and description
         index_value = int(fear_and_greed['value'])
         sentiment = fear_and_greed['value_classification']
-
-        # Customize colors for the sentiment
         sentiment_color = "green" if sentiment in ["Greed", "Extreme Greed"] else "red" if sentiment in ["Fear", "Extreme Fear"] else "orange"
 
-        # Display sentiment in a styled container
+        # Display the Fear and Greed Index
         st.markdown(
             f"""
             <div style="padding: 10px; border-radius: 5px; background-color: #f5f5f5; border: 1px solid #ccc;">
@@ -352,11 +310,11 @@ if menu == "Analytics":
             unsafe_allow_html=True
         )
 
-        # Gauge chart for Fear and Greed Index
-        fig_gauge = go.Figure(go.Indicator(
+        # Gauge Chart for Fear and Greed Index
+        fig_fear_greed = go.Figure(go.Indicator(
             mode="gauge+number+delta",
             value=index_value,
-            delta={'reference': 50},  # Neutral level
+            delta={'reference': 50},
             gauge={
                 'axis': {'range': [0, 100]},
                 'bar': {'color': sentiment_color},
@@ -374,25 +332,90 @@ if menu == "Analytics":
             },
             title={'text': "Fear and Greed Index"}
         ))
+        st.plotly_chart(fig_fear_greed, use_container_width=True)
 
-        st.plotly_chart(fig_gauge, use_container_width=True)
+import plotly.graph_objects as go
 
-    st.write("""
-    ### Sentiment Classification:
-    - **Extreme Fear (0-25)**: Investors are very fearful, potentially a buying opportunity.
-    - **Fear (26-50)**: General fear in the market.
-    - **Neutral (51)**: Balanced sentiment in the market.
-    - **Greed (52-75)**: Growing market optimism.
-    - **Extreme Greed (76-100)**: Investors are overly greedy, potentially a signal for a market correction.
-    """)
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 
-    # Display the GIF
-    st.image(gif_path, caption="Interactive Bitcoin Animation", use_container_width=True)
+# Function to calculate RSI
+def calculate_rsi(close_prices, n=14):
+    close_delta = close_prices.diff()
 
-    # Footer
-    st.markdown("### Empowering your crypto insights – from data to decisions. 🚀 Made with ❤️ and Streamlit. Explore responsibly!")
-    st.markdown("""
-    <style>
-        footer {visibility: hidden;}
-    </style>
-    """, unsafe_allow_html=True)
+    # Separate positive and negative gains
+    up_moves = close_delta.clip(lower=0)  # Keep only positive values
+    down_moves = -close_delta.clip(upper=0)  # Keep only negative values as positive
+
+    # Calculate moving averages
+    avg_u = up_moves.rolling(window=n, min_periods=1).mean()
+    avg_d = down_moves.rolling(window=n, min_periods=1).mean()
+
+    # Calculate the Relative Strength (RS) and RSI
+    rs = avg_u / avg_d
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+# Load the BTC dataset
+btc_data = pd.read_csv("btcusd_1-min_data.csv")
+
+# Preprocess the data
+btc_data['Timestamp'] = pd.to_datetime(btc_data['Timestamp'], unit='s')
+btc_data.set_index('Timestamp', inplace=True)
+
+# Resample the data to monthly frequency (average closing prices per month)
+btc_monthly = btc_data.resample('M').mean()
+
+# Start and end dates for filtering
+start_date = st.date_input("Start Date", value=btc_monthly.index.min().date(), key="rsi_start_date")
+end_date = st.date_input("End Date", value=btc_monthly.index.max().date(), key="rsi_end_date")
+
+# Filter the data for the selected date range
+filtered_btc_data = btc_monthly.loc[start_date:end_date]
+
+if not filtered_btc_data.empty:
+    close_prices = filtered_btc_data['Close']
+    rsi = calculate_rsi(close_prices)
+
+    # Plot RSI with gradient color
+    if not rsi.dropna().empty:
+        fig_rsi = go.Figure()
+
+        # Add RSI as scatter points with gradient color
+        fig_rsi.add_trace(go.Scatter(
+            x=filtered_btc_data.index,
+            y=rsi,
+            mode='markers+lines',
+            name='RSI',
+            marker=dict(
+                size=8,
+                color=rsi,  # Use RSI values for color
+                colorscale='RdYlGn',  # Red-Yellow-Green color scale
+                colorbar=dict(title="RSI")
+            ),
+            line=dict(color='gray', width=1)  # Add connecting lines in gray
+        ))
+
+        # Update layout
+        fig_rsi.update_layout(
+            title="Bitcoin Relative Strength Index (RSI) - Monthly Data",
+            xaxis=dict(title="Date"),
+            yaxis=dict(title="RSI", range=[0, 100]),
+            template="plotly_dark"
+        )
+
+        # Display the chart
+        st.plotly_chart(fig_rsi, use_container_width=True)
+
+        # RSI Insights
+        st.write("""
+        ### RSI Insights:
+        - **RSI > 70**: Bitcoin is overbought, signaling potential selling opportunities.
+        - **RSI < 30**: Bitcoin is oversold, signaling potential buying opportunities.
+        - Use RSI alongside other indicators to make informed decisions.
+        """)
+    else:
+        st.warning("Not enough data to plot RSI.")
+else:
+    st.warning("No data available for the selected date range.")
